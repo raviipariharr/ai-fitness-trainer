@@ -2,20 +2,25 @@
 main.py
 
 Purpose:
-    Entry point for the AI Fitness Trainer. In this phase, it only opens
-    the webcam and displays the live video feed in a window. No pose
-    detection, exercise logic, or UI overlays yet — this just proves the
-    video pipeline works before we build anything on top of it.
+    Entry point for the AI Fitness Trainer. At this phase, it opens the
+    webcam, runs pose detection on each frame, and draws the detected
+    skeleton on the live feed. No exercise logic, rep counting, or form
+    feedback yet — that comes in later phases.
 
 Usage:
     python main.py
+    (Run download_model.py once first if you haven't already.)
 
 Controls:
     Press 'q' or ESC to quit.
     Closing the window (clicking X) also exits cleanly.
 """
 
+import time
+
 import cv2
+
+from pose.detector import PoseDetector
 
 WINDOW_NAME = "AI Fitness Trainer"
 WEBCAM_INDEX = 0
@@ -40,13 +45,15 @@ def open_webcam(index: int) -> cv2.VideoCapture:
     return capture
 
 
-def run_video_loop(capture: cv2.VideoCapture) -> None:
+def run_video_loop(capture: cv2.VideoCapture, detector: PoseDetector) -> None:
     """
-    Continuously read frames from the webcam and display them in a
-    window until the user quits. Handles the case where a frame read
-    fails mid-stream (e.g. camera disconnected) without crashing.
+    Continuously read frames from the webcam, run pose detection, draw
+    the skeleton, and display the result until the user quits. Handles
+    the case where a frame read fails mid-stream (e.g. camera
+    disconnected) without crashing.
     """
     print("Webcam feed started. Press 'q' or ESC to quit.")
+    start_time = time.time()
 
     while True:
         frame_read_successfully, frame = capture.read()
@@ -54,6 +61,10 @@ def run_video_loop(capture: cv2.VideoCapture) -> None:
         if not frame_read_successfully:
             print("Warning: failed to read a frame from the webcam. Stopping.")
             break
+
+        timestamp_ms = int((time.time() - start_time) * 1000)
+        detection_result = detector.detect(frame, timestamp_ms)
+        detector.draw_landmarks(frame, detection_result)
 
         cv2.imshow(WINDOW_NAME, frame)
 
@@ -73,8 +84,16 @@ def main() -> None:
         return
 
     try:
-        run_video_loop(capture)
+        detector = PoseDetector()
+    except FileNotFoundError as error:
+        print(f"Error: {error}")
+        capture.release()
+        return
+
+    try:
+        run_video_loop(capture, detector)
     finally:
+        detector.close()
         capture.release()
         cv2.destroyAllWindows()
         print("Webcam released. Exited cleanly.")
