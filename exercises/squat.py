@@ -21,6 +21,14 @@ Why a state machine, and why two thresholds instead of one:
     travel through the whole dead zone before it can flip the state
     again, so a rep can only be counted once per genuine down-and-up
     movement — this is what "avoid double counting" means in practice.
+
+    Hysteresis alone doesn't catch everything, though: a single bad
+    frame (a momentary MediaPipe misdetection) can still swing the raw
+    angle far enough to flip a state and register a phantom rep, even
+    if the person never moved. The raw angle is smoothed with an
+    exponential moving average (utils/smoothing.py) before it ever
+    reaches the state machine, which damps exactly that kind of
+    single-frame spike.
 """
 
 from enum import Enum
@@ -28,6 +36,7 @@ from typing import Optional
 
 from pose.landmarks import LEG_LANDMARKS, get_leg_points, is_visible, pick_more_visible_side
 from utils.angles import calculate_angle_or_none
+from utils.smoothing import ExponentialMovingAverage
 
 
 class SquatState(Enum):
@@ -47,6 +56,7 @@ class SquatCounter:
         down_threshold: float = 100.0,
         up_threshold: float = 160.0,
         min_visibility: float = 0.5,
+        smoothing_alpha: float = 0.5,
     ):
         if down_threshold >= up_threshold:
             raise ValueError("down_threshold must be lower than up_threshold")
@@ -59,6 +69,7 @@ class SquatCounter:
         self.rep_count = 0
         self.current_knee_angle: Optional[float] = None
         self.active_side: Optional[str] = None
+        self._angle_smoother = ExponentialMovingAverage(alpha=smoothing_alpha)
 
     def update(self, coordinates: dict) -> dict:
         """
@@ -93,9 +104,11 @@ class SquatCounter:
         if knee_angle is None:
             return self._status(landmarks_visible=False)
 
-        self.current_knee_angle = knee_angle
+        smoothed_angle = self._angle_smoother.update(knee_angle)
+
+        self.current_knee_angle = smoothed_angle
         self.active_side = side
-        self._update_state(knee_angle)
+        self._update_state(smoothed_angle)
 
         return self._status(landmarks_visible=True)
 
@@ -123,3 +136,4 @@ class SquatCounter:
         self.rep_count = 0
         self.current_knee_angle = None
         self.active_side = None
+        self._angle_smoother.reset()

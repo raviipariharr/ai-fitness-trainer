@@ -28,6 +28,7 @@ from pose.landmarks import (
     get_shoulder_center,
     is_visible,
 )
+from utils.smoothing import ExponentialMovingAverage
 
 
 class JackState(Enum):
@@ -69,6 +70,7 @@ class JumpingJackCounter:
         legs_open_ratio: float = 1.7,
         legs_closed_ratio: float = 1.3,
         min_visibility: float = 0.5,
+        smoothing_alpha: float = 0.5,
     ):
         if arm_lowered_ratio >= arm_raised_ratio:
             raise ValueError("arm_lowered_ratio must be lower than arm_raised_ratio")
@@ -85,6 +87,11 @@ class JumpingJackCounter:
         self.rep_count = 0
         self.current_arm_ratio: Optional[float] = None
         self.current_leg_ratio: Optional[float] = None
+        # Two independent smoothers - arms and legs are different
+        # signals with their own noise, so blending them together
+        # would let noise on one limb bleed into the other's reading.
+        self._arm_smoother = ExponentialMovingAverage(alpha=smoothing_alpha)
+        self._leg_smoother = ExponentialMovingAverage(alpha=smoothing_alpha)
 
     def update(self, coordinates: dict) -> dict:
         """
@@ -101,13 +108,19 @@ class JumpingJackCounter:
         arm_ratio = self._compute_arm_raise_ratio(coordinates)
         leg_ratio = self._compute_leg_spread_ratio(coordinates)
 
-        self.current_arm_ratio = arm_ratio
-        self.current_leg_ratio = leg_ratio
-
         if arm_ratio is None or leg_ratio is None:
+            # Don't touch the smoothers or current_*_ratio here - leave
+            # them holding their last known values, same as every other
+            # counter does when a frame's landmarks aren't visible.
             return self._status(landmarks_visible=False)
 
-        self._update_state(arm_ratio, leg_ratio)
+        smoothed_arm_ratio = self._arm_smoother.update(arm_ratio)
+        smoothed_leg_ratio = self._leg_smoother.update(leg_ratio)
+
+        self.current_arm_ratio = smoothed_arm_ratio
+        self.current_leg_ratio = smoothed_leg_ratio
+
+        self._update_state(smoothed_arm_ratio, smoothed_leg_ratio)
         return self._status(landmarks_visible=True)
 
     def _compute_arm_raise_ratio(self, coordinates: dict) -> Optional[float]:
@@ -193,3 +206,5 @@ class JumpingJackCounter:
         self.rep_count = 0
         self.current_arm_ratio = None
         self.current_leg_ratio = None
+        self._arm_smoother.reset()
+        self._leg_smoother.reset()

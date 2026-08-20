@@ -33,6 +33,7 @@ from pose.landmarks import (
     pick_more_visible_side,
 )
 from utils.angles import calculate_angle_or_none
+from utils.smoothing import ExponentialMovingAverage
 
 
 class PushupState(Enum):
@@ -54,6 +55,7 @@ class PushupCounter:
         good_depth_threshold: float = 100.0,
         straight_body_threshold: float = 160.0,
         min_visibility: float = 0.5,
+        smoothing_alpha: float = 0.5,
     ):
         if down_threshold >= up_threshold:
             raise ValueError("down_threshold must be lower than up_threshold")
@@ -70,6 +72,7 @@ class PushupCounter:
         self.active_side: Optional[str] = None
         self._min_angle_this_rep: Optional[float] = None
         self.last_rep_feedback: Optional[str] = None
+        self._angle_smoother = ExponentialMovingAverage(alpha=smoothing_alpha)
 
     def update(self, coordinates: dict) -> dict:
         """
@@ -100,9 +103,11 @@ class PushupCounter:
         if elbow_angle is None:
             return self._status(landmarks_visible=False, body_feedback=None)
 
-        self.current_elbow_angle = elbow_angle
+        smoothed_angle = self._angle_smoother.update(elbow_angle)
+
+        self.current_elbow_angle = smoothed_angle
         self.active_side = side
-        self._update_state(elbow_angle)
+        self._update_state(smoothed_angle)
 
         body_feedback = self._check_body_alignment(coordinates, side, shoulder)
 
@@ -170,3 +175,4 @@ class PushupCounter:
         self.active_side = None
         self._min_angle_this_rep = None
         self.last_rep_feedback = None
+        self._angle_smoother.reset()

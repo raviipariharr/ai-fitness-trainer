@@ -30,6 +30,7 @@ from typing import Optional
 
 from pose.landmarks import ARM_LANDMARKS, Landmark, get_arm_points, get_landmark, is_visible, pick_more_visible_side
 from utils.angles import calculate_angle_or_none
+from utils.smoothing import ExponentialMovingAverage
 
 
 class CurlState(Enum):
@@ -56,6 +57,7 @@ class BicepCurlCounter:
         good_contraction_threshold: float = 60.0,
         max_elbow_drift_ratio: float = 0.3,
         min_visibility: float = 0.5,
+        smoothing_alpha: float = 0.5,
     ):
         if contracted_threshold >= extended_threshold:
             raise ValueError("contracted_threshold must be lower than extended_threshold")
@@ -73,6 +75,7 @@ class BicepCurlCounter:
         self._min_angle_this_rep: Optional[float] = None
         self._max_drift_ratio_this_rep: float = 0.0
         self.last_rep_feedback: Optional[str] = None
+        self._angle_smoother = ExponentialMovingAverage(alpha=smoothing_alpha)
 
     def update(self, coordinates: dict) -> dict:
         """
@@ -102,11 +105,13 @@ class BicepCurlCounter:
         if elbow_angle is None:
             return self._status(landmarks_visible=False)
 
-        self.current_elbow_angle = elbow_angle
+        smoothed_angle = self._angle_smoother.update(elbow_angle)
+
+        self.current_elbow_angle = smoothed_angle
         self.active_side = side
 
         self._track_elbow_drift(coordinates, side, shoulder, elbow)
-        self._update_state(elbow_angle)
+        self._update_state(smoothed_angle)
 
         return self._status(landmarks_visible=True)
 
@@ -178,3 +183,4 @@ class BicepCurlCounter:
         self._min_angle_this_rep = None
         self._max_drift_ratio_this_rep = 0.0
         self.last_rep_feedback = None
+        self._angle_smoother.reset()
