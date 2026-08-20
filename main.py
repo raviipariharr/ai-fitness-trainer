@@ -5,14 +5,15 @@ Purpose:
     Entry point for the AI Fitness Trainer. Opens the webcam, runs
     pose detection on each frame, and drives whichever exercise the
     user has selected through the ExerciseTracker interface
-    (exercises/base.py). Reps, state, and form feedback all come from
-    the tracker's standardized status dict.
+    (exercises/base.py). Reps, state, progress, and form feedback all
+    come from the tracker's standardized status dict; the on-screen
+    look of all that is handled by ui/overlay.py, not by this file.
 
-    This file has no idea what a squat or a push-up is. Exercise
-    selection is a single dict lookup into EXERCISE_REGISTRY
-    (exercises/registry.py) — there is no if/elif chain checking which
-    exercise is active anywhere in this file. Adding a fifth exercise
-    means adding one entry to the registry and one line to
+    This file has no idea what a squat or a push-up is, and no idea
+    what a progress bar looks like. Exercise selection is a single
+    dict lookup into EXERCISE_REGISTRY (exercises/registry.py); the
+    HUD is a single call to ui.overlay.render_hud(). Adding a fifth
+    exercise means adding one entry to the registry and one line to
     SELECTION_KEYS below; nothing else here changes.
 
 Usage:
@@ -34,6 +35,7 @@ import cv2
 
 from pose.detector import PoseDetector
 from exercises.registry import EXERCISE_REGISTRY
+from ui.overlay import render_hud
 
 WINDOW_NAME = "AI Fitness Trainer"
 WEBCAM_INDEX = 0
@@ -69,45 +71,6 @@ def open_webcam(index: int) -> cv2.VideoCapture:
     return capture
 
 
-def draw_menu(frame) -> None:
-    """
-    List every available exercise and its selection key along the
-    bottom of the frame. Built entirely from SELECTION_KEYS and the
-    registry's display_name - adding an exercise updates this menu
-    automatically, no code change needed here.
-    """
-    height = frame.shape[0]
-    y = height - 15 - (len(SELECTION_KEYS) * 20)
-
-    for key_code, registry_key in SELECTION_KEYS.items():
-        tracker_class = EXERCISE_REGISTRY[registry_key]
-        label = f"[{chr(key_code)}] {tracker_class.display_name}"
-        cv2.putText(frame, label, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-        y += 20
-
-
-def draw_status(frame, tracker, status: dict) -> None:
-    """
-    Draw exercise name, rep count, state, and any feedback/detail the
-    tracker provided. Reads only the standardized ExerciseTracker
-    status shape, so this works identically for every exercise.
-    """
-    cv2.putText(frame, tracker.display_name, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-    cv2.putText(frame, f"Reps: {status['rep_count']}", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 3)
-    cv2.putText(frame, f"State: {status['state']}", (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-    y = 120
-    if not status["landmarks_visible"]:
-        cv2.putText(frame, "Body not clearly visible", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 1)
-        y += 22
-    elif status["detail"]:
-        cv2.putText(frame, status["detail"], (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-        y += 22
-
-    if status["feedback"]:
-        cv2.putText(frame, status["feedback"], (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 1)
-
-
 def run_video_loop(capture: cv2.VideoCapture, detector: PoseDetector) -> None:
     """
     Continuously read frames, run pose detection, feed landmarks to
@@ -135,8 +98,7 @@ def run_video_loop(capture: cv2.VideoCapture, detector: PoseDetector) -> None:
         coordinates = detector.get_landmark_coordinates(detection_result, frame.shape)
 
         status = tracker.update(coordinates)
-        draw_status(frame, tracker, status)
-        draw_menu(frame)
+        render_hud(frame, tracker.display_name, status, EXERCISE_REGISTRY, SELECTION_KEYS, current_key)
 
         cv2.imshow(WINDOW_NAME, frame)
 

@@ -29,6 +29,23 @@ from .pushup import PushupCounter
 from .squat import SquatCounter
 
 
+def _normalize_progress(value: float, resting_value: float, peak_value: float) -> float:
+    """
+    Map a raw angle or ratio onto a 0.0-1.0 progress scale, where 0.0
+    is the resting position (e.g. standing, arm extended) and 1.0 is
+    the peak of the movement (e.g. squat depth, full curl). Works
+    whether the peak value is numerically lower than resting (angles,
+    which shrink as a joint bends) or higher (jumping jack ratios,
+    which grow as arms/legs open) — the direction is inferred from
+    which of resting_value/peak_value is larger. Clipped to [0, 1]
+    since live sensor readings can briefly overshoot either end.
+    """
+    if resting_value == peak_value:
+        return 0.0
+    raw_progress = (value - resting_value) / (peak_value - resting_value)
+    return max(0.0, min(1.0, raw_progress))
+
+
 class SquatTracker(ExerciseTracker):
     display_name = "Squats"
 
@@ -39,9 +56,15 @@ class SquatTracker(ExerciseTracker):
         status = self._counter.update(coordinates)
         angle = status["knee_angle"]
         detail = f"{status['side']} knee: {angle:.0f} deg" if angle is not None else None
+        progress = (
+            _normalize_progress(angle, self._counter.up_threshold, self._counter.down_threshold)
+            if angle is not None
+            else 0.0
+        )
         return {
             "rep_count": status["rep_count"],
             "state": status["state"],
+            "progress": progress,
             "feedback": None,
             "detail": detail,
             "landmarks_visible": status["landmarks_visible"],
@@ -61,12 +84,18 @@ class PushupTracker(ExerciseTracker):
         status = self._counter.update(coordinates)
         angle = status["elbow_angle"]
         detail = f"{status['side']} elbow: {angle:.0f} deg" if angle is not None else None
+        progress = (
+            _normalize_progress(angle, self._counter.up_threshold, self._counter.down_threshold)
+            if angle is not None
+            else 0.0
+        )
         # Live body-alignment warnings take priority over the last
         # completed rep's feedback, since posture matters every frame.
         feedback = status["body_feedback"] or status["last_rep_feedback"]
         return {
             "rep_count": status["rep_count"],
             "state": status["state"],
+            "progress": progress,
             "feedback": feedback,
             "detail": detail,
             "landmarks_visible": status["landmarks_visible"],
@@ -86,9 +115,15 @@ class BicepCurlTracker(ExerciseTracker):
         status = self._counter.update(coordinates)
         angle = status["elbow_angle"]
         detail = f"{status['side']} elbow: {angle:.0f} deg" if angle is not None else None
+        progress = (
+            _normalize_progress(angle, self._counter.extended_threshold, self._counter.contracted_threshold)
+            if angle is not None
+            else 0.0
+        )
         return {
             "rep_count": status["rep_count"],
             "state": status["state"],
+            "progress": progress,
             "feedback": status["last_rep_feedback"],
             "detail": detail,
             "landmarks_visible": status["landmarks_visible"],
@@ -113,9 +148,24 @@ class JumpingJackTracker(ExerciseTracker):
             if arm_ratio is not None and leg_ratio is not None
             else None
         )
+        if arm_ratio is not None and leg_ratio is not None:
+            arm_progress = _normalize_progress(
+                arm_ratio, self._counter.arm_lowered_ratio, self._counter.arm_raised_ratio
+            )
+            leg_progress = _normalize_progress(
+                leg_ratio, self._counter.legs_closed_ratio, self._counter.legs_open_ratio
+            )
+            # Average the two — a jumping jack only really completes
+            # when arms and legs are both partway there together, so a
+            # single combined bar tells a more honest story than
+            # showing whichever limb happens to be further along.
+            progress = (arm_progress + leg_progress) / 2
+        else:
+            progress = 0.0
         return {
             "rep_count": status["rep_count"],
             "state": status["state"],
+            "progress": progress,
             "feedback": None,
             "detail": detail,
             "landmarks_visible": status["landmarks_visible"],

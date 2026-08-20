@@ -32,6 +32,9 @@ class ExerciseTracker(ABC):
             {
                 "rep_count": int,
                 "state": str,               # exercise-specific state name
+                "progress": float,           # 0.0 (resting) to 1.0 (peak
+                                              # of the movement) — drives
+                                              # the UI's progress bar
                 "feedback": str | None,      # form feedback, if any
                 "detail": str | None,        # e.g. "left knee: 92 deg"
                 "landmarks_visible": bool,
